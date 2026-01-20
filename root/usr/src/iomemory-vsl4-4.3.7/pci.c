@@ -466,10 +466,15 @@ static uint8_t find_slot_number_bios(const struct pci_dev *dev)
     return 0;
 }
 
+/**
+ * ACPI slot number lookup - not implemented.
+ * This would require evaluating the _SUN (Slot User Number) ACPI method
+ * on the device's parent bridge. Returns 0 to indicate slot unknown.
+ */
 static uint8_t find_slot_number_acpi(const struct pci_dev *pcidev)
 {
-    unsigned long long sun = 0;
-    return (uint8_t)sun;
+    (void)pcidev;  // Unused - ACPI lookup not implemented
+    return 0;
 }
 
 uint8_t kfio_pci_get_slot(kfio_pci_dev_t *pdev)

@@ -50,6 +50,7 @@ int noinline __kfio_create_cache(fusion_mem_cache_t *pcache, char *name, uint32_
 //    kassert(pcache->name);
 //    kassert(name);
     strncpy(pcache->name, name, 39);
+    pcache->name[39] = '\0';  // Ensure null termination
 
     pcache->p = kmem_cache_create(pcache->name, size, align, 0, NULL);
 

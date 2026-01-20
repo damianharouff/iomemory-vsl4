@@ -93,6 +93,7 @@ int kfio_register_cpu_notifier(kfio_cpu_notify_fn *func)
 #ifdef CONFIG_SMP
     struct kfio_cpu_notify *kcn;
     int do_register = 0;
+    int ret;
 
     kcn = kmalloc(sizeof(*kcn), GFP_KERNEL);
     if (!kcn)
@@ -113,18 +114,40 @@ int kfio_register_cpu_notifier(kfio_cpu_notify_fn *func)
     {
         // Setup CPU hotplug state callbacks for online/offline notifications.
         // Kernel 4.10+ has symmetrical CPUHP_..._DYN states for both directions.
-        cpuhp_offline_dyn_state =
-        cpuhp_setup_state_nocalls(CPUHP_BP_PREPARE_DYN,
-                                   "block/iomemory_vsl4:offline",
-                                   NULL,
-                                   kfio_cpu_notify_offline);
-        cpuhp_online_dyn_state =
-        cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-                                  "block/iomemory_vsl4:online",
-                                  kfio_cpu_notify_online,
-                                  NULL);
+        ret = cpuhp_setup_state_nocalls(CPUHP_BP_PREPARE_DYN,
+                                        "block/iomemory_vsl4:offline",
+                                        NULL,
+                                        kfio_cpu_notify_offline);
+        if (ret < 0)
+        {
+            // Cleanup on failure
+            spin_lock(&hotplug_lock);
+            list_del(&kcn->list);
+            hotplug_registering = 0;
+            spin_unlock(&hotplug_lock);
+            kfree(kcn);
+            return ret;
+        }
+        cpuhp_offline_dyn_state = ret;
 
-        // Mark initialization complete after setup
+        ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+                                        "block/iomemory_vsl4:online",
+                                        kfio_cpu_notify_online,
+                                        NULL);
+        if (ret < 0)
+        {
+            // Cleanup on failure - remove offline state and free kcn
+            cpuhp_remove_state_nocalls(cpuhp_offline_dyn_state);
+            spin_lock(&hotplug_lock);
+            list_del(&kcn->list);
+            hotplug_registering = 0;
+            spin_unlock(&hotplug_lock);
+            kfree(kcn);
+            return ret;
+        }
+        cpuhp_online_dyn_state = ret;
+
+        // Mark initialization complete after successful setup
         spin_lock(&hotplug_lock);
         hotplug_initialized = 1;
         hotplug_registering = 0;

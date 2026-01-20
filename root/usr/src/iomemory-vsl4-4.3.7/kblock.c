@@ -670,6 +670,10 @@ static int linux_bdev_expose_disk(struct fio_bdev *bdev)
     }
 
     disk->gd = gd = BLK_ALLOC_DISK
+    if (gd == NULL)
+    {
+        return -ENOMEM;
+    }
 
     switch(use_workqueue)
     {
@@ -753,12 +757,6 @@ static int linux_bdev_expose_disk(struct fio_bdev *bdev)
 #else
     blk_queue_flag_clear(BLK_FEAT_ADD_RANDOM, rq);
 #endif
-
-    if (disk->gd == NULL)
-    {
-        linux_bdev_hide_disk(bdev, KFIO_DISK_OP_SHUTDOWN | KFIO_DISK_OP_FORCE);
-        return -ENOMEM;
-    }
 
     gd->major = fio_major;
     gd->first_minor = FIO_NUM_MINORS * bdev->bdev_index;
