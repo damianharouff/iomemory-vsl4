@@ -154,7 +154,7 @@ unsigned int kfio_pci_enable_msix(kfio_pci_dev_t *__pdev, kfio_msix_t *msix, uns
 {
     struct pci_dev *pdev = (struct pci_dev *) __pdev;
     struct msix_entry *msi = (struct msix_entry *) msix;
-    int err, i;
+    int nvec, i;
 
     if (!pci_find_capability(pdev, PCI_CAP_ID_MSIX))
     {
@@ -166,11 +166,18 @@ unsigned int kfio_pci_enable_msix(kfio_pci_dev_t *__pdev, kfio_msix_t *msix, uns
         msi[i].vector = 0;
         msi[i].entry = i;
     }
-    err = pci_enable_msix_exact(pdev, msi, nr_vecs);
 
-    if (err)
+    // Use modern pci_alloc_irq_vectors API (replaces deprecated pci_enable_msix_exact)
+    nvec = pci_alloc_irq_vectors(pdev, nr_vecs, nr_vecs, PCI_IRQ_MSIX);
+    if (nvec < 0)
     {
         return 0;
+    }
+
+    // Populate the msix_entry vector fields with allocated IRQ numbers
+    for (i = 0; i < nr_vecs; i++)
+    {
+        msi[i].vector = pci_irq_vector(pdev, i);
     }
 
     return nr_vecs;
@@ -178,7 +185,7 @@ unsigned int kfio_pci_enable_msix(kfio_pci_dev_t *__pdev, kfio_msix_t *msix, uns
 
 void kfio_pci_disable_msix(kfio_pci_dev_t *pdev, kfio_msix_t *msix)
 {
-    pci_disable_msix((struct pci_dev *)pdev);
+    pci_free_irq_vectors((struct pci_dev *)pdev);
 }
 
 /*************************************************************************************/
@@ -431,7 +438,11 @@ static uint8_t find_slot_number_bios(const struct pci_dev *dev)
                 && pir_entry.pci_irqr_table_size > SYSTEM_REQUIRED_MIN_SIZE
                 && (pir_entry.pci_irqr_table_size % SYSTEM_REQUIRED_SIZE_ALIGNMENT) == 0)
             {
-                stop_addr = next_addr + pir_entry.pci_irqr_table_size;
+                const uint8_t *table_end = next_addr + pir_entry.pci_irqr_table_size;
+                const uint8_t *bios_end = (const uint8_t *)bios_addr + BIOS_MEMORY_LEN;
+
+                // Bounds check: ensure table doesn't extend beyond mapped region
+                stop_addr = (table_end > bios_end) ? bios_end : table_end;
                 for (; next_addr < stop_addr; next_addr += sizeof(pci_slot_entry_t))
                 {
                     pci_slot_entry_t slot_entry;
@@ -601,6 +612,8 @@ int kfio_pci_map_barnum(kfio_pci_dev_t *pci_dev, const char *device_label, void 
 {
     uint64_t bar_phys;
 
+    *bar_virt = NULL;
+
     if ((bar_phys = kfio_pci_resource_start(pci_dev, barnum)) != 0)
     {
         engprint("%s: mapping controller on BAR %u\n", device_label, barnum);
@@ -677,22 +690,10 @@ void kfio_destroy_pipeline(kfio_pci_dev_t *pd, int pipeline, void *context, int 
     iodrive_pci_destroy_pipeline(pd, pipeline, shutdown);
 }
 
-int kfio_ignore_pci_device(kfio_pci_dev_t *pdev);
-
-// TODO: seems like this code path is not used...kfio_ignore_pci_device is not defined anywhere.
 int iodrive_pci_probe(struct pci_dev *linux_pci_dev, const struct pci_device_id *id)
 {
     int result;
-
-    // The horror...  the horror...
     kfio_pci_dev_t *pci_dev = (kfio_pci_dev_t *)linux_pci_dev;
-
-    if (kfio_ignore_pci_device(pci_dev) != 0)
-    {
-        infprint("%s: ioMemory: ignoring device\n", kfio_pci_name(pci_dev));
-
-        return -ENODEV;
-    }
 
     // NOTE: DO allow yourself to be tempted to call pci_disable_device
     // because not doing so leaves the PCI device in 'unknown' power state
@@ -746,7 +747,6 @@ exit_disable_device:
 
 static void iodrive_pci_on_remove(struct pci_dev *linux_pci_dev)
 {
-    // The horror...  the horror...
     kfio_pci_dev_t *pci_dev = (kfio_pci_dev_t *)linux_pci_dev;
 
     engprint("PCI device removed\n");
@@ -758,7 +758,6 @@ static void iodrive_pci_on_remove(struct pci_dev *linux_pci_dev)
 
 static void iodrive_pci_on_shutdown(struct pci_dev *linux_pci_dev)
 {
-    // The horror...  the horror...
     kfio_pci_dev_t *pci_dev = (kfio_pci_dev_t *)linux_pci_dev;
 
     engprint("PCI device shutdown\n");

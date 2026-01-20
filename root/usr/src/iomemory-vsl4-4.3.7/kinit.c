@@ -85,11 +85,7 @@ int kfio_platform_teardown_storage_interface(void)
 #endif
 
 #if KFIO_BLOCK_DEVICE
-    rc = kfio_platform_teardown_block_interface();
-    if (rc < 0)
-    {
-        return rc;
-    }
+    kfio_platform_teardown_block_interface();
 #endif
 
     return rc;

@@ -82,16 +82,21 @@ int fio_state_in_one_of(fio_state_t *s, uint32_t num_states, ...)
 }
 
 /**
- * @brief fio_state_in_one_of - lock, compare, unlock
+ * @brief fio_state_not_in_one_of - lock, compare, unlock
  */
 int fio_state_not_in_one_of(fio_state_t *s, uint32_t num_states, ...)
 {
-    int cur_state = s->state;
+    int cur_state;
     int retval = 1;
     int i;
     va_list ap;
 
     va_start(ap, num_states);
+
+    // Lock around state read for consistency with fio_state_in_one_of
+    fusion_cv_lock_irq(&s->lk);
+    cur_state = s->state;
+    fusion_cv_unlock_irq(&s->lk);
 
     for (i = 0; i < num_states; i++)
     {

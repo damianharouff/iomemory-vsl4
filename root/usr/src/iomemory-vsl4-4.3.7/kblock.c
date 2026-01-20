@@ -157,11 +157,9 @@ int kfio_platform_init_block_interface(void)
     return fio_major <= 0 ? -EBUSY : 0;
 }
 
-// TODO: unregister_blkdev returns void. should cleanup.
-int kfio_platform_teardown_block_interface(void)
+void kfio_platform_teardown_block_interface(void)
 {
     unregister_blkdev(fio_major, "fio");
-    return 0;
 }
 
 /******************************************************************************
@@ -733,8 +731,7 @@ static int linux_bdev_expose_disk(struct fio_bdev *bdev)
     {
         // https://lore.kernel.org/linux-btrfs/20220409045043.23593-25-hch@lst.de/
         SET_QUEUE_FLAG_DISCARD;
-        // blk_queue_flag_set(QUEUE_FLAG_DISCARD, rq);
-        // XXXXXXX !!! WARNING - power of two sector sizes only !!! (always true in standard linux)
+        // Assumes power-of-two block sizes (standard for Linux block devices)
         rq->limits.max_hw_discard_sectors = (UINT_MAX & ~((unsigned int) bdev->bdev_block_size - 1)) >> 9;
         rq->limits.discard_granularity = bdev->bdev_block_size;
     }
@@ -986,7 +983,7 @@ static void linux_bdev_destroy_disk(struct fio_bdev *bdev)
     bdev->bdev_gd = NULL;
 }
 
-//TODO: this function as it stands does nothing unless queueing is disabled.
+// Stats updates only apply when queueing is disabled (USE_QUEUE_NONE)
 void linux_bdev_update_stats(struct fio_bdev *bdev, int dir, uint64_t totalsize, uint64_t duration)
 {
     struct kfio_disk *disk = (struct kfio_disk *)bdev->bdev_gd;
@@ -1635,10 +1632,7 @@ static struct request_queue *kfio_alloc_queue(struct kfio_disk *dp,
 #if KFIOC_X_HAS_MAKE_REQUEST_FN
         blk_queue_make_request(rq, kfio_make_request);
 #endif
-        // TODO:
-        // if kfio_disk support spinlock_t instead of lame fusion_spinlock_t for queueu_lock
-        // dp->queue_lock = rq->queue_lock;
-        memcpy((void*) &dp->queue_lock, &rq->queue_lock, sizeof(dp->queue_lock));
+        // queue_lock already initialized in linux_bdev_create_disk via fusion_init_spin
     }
     return rq;
 }
@@ -1648,7 +1642,6 @@ static int should_holdoff_writes(struct kfio_disk *disk)
     return fio_test_bit_atomic(KFIO_DISK_HOLDOFF_BIT, &disk->disk_state);
 }
 
-//TODO: We need to revisit this and do some cleanup.
 static void linux_bdev_backpressure(struct fio_bdev *bdev, int on)
 {
     struct kfio_disk *disk = (struct kfio_disk *)bdev->bdev_gd;
@@ -1746,8 +1739,7 @@ static int holdoff_writes_under_pressure(struct kfio_disk *disk)
     return 1;
 }
 
-// TODO: why return void* instead of kfio_plug*?
-static void *kfio_should_plug(struct request_queue *q)
+static struct kfio_plug *kfio_should_plug(struct request_queue *q)
 {
     struct kfio_disk *disk = q->queuedata;
     struct kfio_plug *kplug;
@@ -1823,7 +1815,7 @@ KFIO_SUBMIT_BIO
     struct request_queue *queue = bio->BIO_DISK->queue;
 #endif
     struct kfio_disk *disk = queue->queuedata;
-    void *plug_data;
+    struct kfio_plug *plug_data;
 
     if (bio_data_dir(bio) == WRITE && !holdoff_writes_under_pressure(disk))
     {

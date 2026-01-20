@@ -86,9 +86,6 @@ static int fio_do_init(void)
     rc = kfio_pci_register_driver();
     if (rc < 0)
     {
-        /* Not sure why this is needed. */
-        kfio_pci_unregister_driver();
-
         rc = -ENODEV;
         goto error_exit;
     }
@@ -139,7 +136,7 @@ static int __init init_fio_driver(void)
 {
     int rc = 0;
 
-// wtf is this?
+// Mono kernel builds require manual device attachment
 #if defined(__MONO_KERNEL__)
     auto_attach = 0;
 #endif

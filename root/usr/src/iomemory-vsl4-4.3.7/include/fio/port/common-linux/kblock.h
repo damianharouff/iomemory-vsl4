@@ -41,7 +41,7 @@
 // common-linux BLOCK initialization interfaces
 
 extern int kfio_platform_init_block_interface(void);
-extern int kfio_platform_teardown_block_interface(void);
+extern void kfio_platform_teardown_block_interface(void);
 /**
  * @}
  */
